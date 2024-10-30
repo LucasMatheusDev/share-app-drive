@@ -8,7 +8,6 @@ import 'package:path/path.dart' as path;
 
 const defaultWebhookUrl =
     'https://prod-108.westus.logic.azure.com:443/workflows/3bc094ec689345609094ff63ad583c46/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=da79bLYuDCu6tAvMQWMSqt5bmzbxrxNy3BI5cJ71lQw';
-const defaulttoken = "";
 
 Timer animateLoading() {
   final frames = ['-', '\\', '|', '/'];
@@ -72,14 +71,6 @@ void main(List<String> arguments) async {
       abbr: 'w',
       defaultsTo: defaultWebhookUrl,
       help: 'The Teams webhook URL to send the message.',
-    )
-    ..addOption(
-      'onedrive-token',
-      mandatory: false,
-      defaultsTo: defaulttoken,
-      abbr: 'o',
-      help: 'The OneDrive access token to upload the app.\n'
-          'Find token in https://developer.microsoft.com/en-us/graph/graph-explorer',
     );
 
   final args = parser.parse(arguments);
@@ -99,12 +90,8 @@ void main(List<String> arguments) async {
   final appType = args['app'] as String?;
   final appName = args['name'] as String?;
   final webhookUrl = args['webhook'] ?? defaultWebhookUrl;
-  final onedriveToken = args['onedrive-token'] as String?;
 
-  if (task == null ||
-      appType == null ||
-      appName == null ||
-      onedriveToken == null) {
+  if (task == null || appType == null || appName == null) {
     print('Error: Missing required arguments.');
     print(parser.usage);
     exit(1);
@@ -113,25 +100,26 @@ void main(List<String> arguments) async {
 
   if (appType == 'apk' || appType == 'both') {
     final animationtimer = animateLoading();
+    final token = await getTokenOnedrive();
     final outPutFilePath = await buildApp('apk', appName, verbose);
     urlsApps.add(await uploadToOneDrive(
       outPutFilePath,
       task,
       verbose,
-      onedriveToken,
+      token,
     ));
     animationtimer.cancel();
   }
 
   if (appType == 'ios' || appType == 'both') {
     final animationtimer = animateLoading();
-
+    final token = await getTokenOnedrive();
     final outPutFilePath = await buildApp('ipa', appName, verbose);
     urlsApps.add(await uploadToOneDrive(
       outPutFilePath,
       task,
       verbose,
-      onedriveToken,
+      token,
     ));
     animationtimer.cancel();
   }
@@ -171,6 +159,28 @@ Future<String> buildApp(String appType, String appName, bool verbose) async {
   return buildPath;
 }
 
+Future<String> getTokenOnedrive() async {
+  final response = await http.post(
+    Uri.parse('https://login.microsoftonline.com/common/oauth2/v2.0/token'),
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: {
+      'client_id': 'seu client id',
+      'scope': 'https://graph.microsoft.com/.default',
+      'client_secret': 'seu client secret',
+      'grant_type': 'client_credentials',
+    },
+  );
+
+  if (response.statusCode == 200) {
+    final jsonResponse = jsonDecode(response.body);
+    return jsonResponse['access_token'] as String;
+  } else {
+    throw Exception('Erro ao obter token do OneDrive: ${response.body}');
+  }
+}
+
 Future<String> uploadToOneDrive(
   String filePath,
   String drivePath,
@@ -194,7 +204,7 @@ Future<String> uploadToOneDrive(
   final response = await http.put(
     Uri.parse(uploadUrl),
     headers: {
-      'Authorization': 'Bearer $defaulttoken',
+      'Authorization': 'Bearer $token',
       'Content-Type': 'text/plain',
     },
     body: file.readAsBytesSync(),
